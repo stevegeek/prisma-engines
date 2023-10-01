@@ -29,6 +29,7 @@ use schema_connector::ConnectorParams;
 use sql_schema_connector::SqlSchemaConnector;
 use std::{env, path::Path};
 use user_facing_errors::common::InvalidConnectionString;
+use url::Url;
 
 fn parse_schema(schema: SourceFile) -> CoreResult<ValidatedSchema> {
     psl::parse_schema(schema).map_err(CoreError::new_schema_parser_error)
@@ -39,8 +40,30 @@ fn connector_for_connection_string(
     shadow_database_connection_string: Option<String>,
     preview_features: BitFlags<PreviewFeature>,
 ) -> CoreResult<Box<dyn schema_connector::SchemaConnector>> {
-    match connection_string.split(':').next() {
-        Some("postgres") | Some("postgresql") => {
+    match Url::parse(&connection_string) {
+        Ok(url) => {
+            let scheme = url.scheme();
+            connector_for_connection_string_and_scheme(
+                scheme,
+                connection_string,
+                shadow_database_connection_string,
+                preview_features
+            )
+        }
+        Err(_) => Err(CoreError::user_facing(InvalidConnectionString {
+            details: String::new(),
+        })),
+    }
+}
+
+fn connector_for_connection_string_and_scheme(
+    scheme: &str,
+    connection_string: String,
+    shadow_database_connection_string: Option<String>,
+    preview_features: BitFlags<PreviewFeature>,
+) -> CoreResult<Box<dyn schema_connector::SchemaConnector>> {
+    match scheme {
+        "postgres" | "postgresql" => {
             let params = ConnectorParams {
                 connection_string,
                 preview_features,
@@ -50,7 +73,7 @@ fn connector_for_connection_string(
             connector.set_params(params)?;
             Ok(Box::new(connector))
         }
-        Some("file") => {
+        "file" => {
             let params = ConnectorParams {
                 connection_string,
                 preview_features,
@@ -60,7 +83,7 @@ fn connector_for_connection_string(
             connector.set_params(params)?;
             Ok(Box::new(connector))
         }
-        Some("mysql") => {
+        "mysql" => {
             let params = ConnectorParams {
                 connection_string,
                 preview_features,
@@ -70,7 +93,7 @@ fn connector_for_connection_string(
             connector.set_params(params)?;
             Ok(Box::new(connector))
         }
-        Some("sqlserver") => {
+        "sqlserver" => {
             let params = ConnectorParams {
                 connection_string,
                 preview_features,
@@ -80,7 +103,7 @@ fn connector_for_connection_string(
             connector.set_params(params)?;
             Ok(Box::new(connector))
         }
-        Some("mongodb+srv") | Some("mongodb") => {
+        "mongodb+srv" | "mongodb" => {
             let params = ConnectorParams {
                 connection_string,
                 preview_features,
@@ -89,12 +112,9 @@ fn connector_for_connection_string(
             let connector = MongoDbSchemaConnector::new(params);
             Ok(Box::new(connector))
         }
-        Some(other) => Err(CoreError::url_parse_error(format!(
-            "`{other}` is not a known connection URL scheme. Prisma cannot determine the connector."
+        other => Err(CoreError::url_parse_error(format!(
+            "`{other}` is not a known connection URL scheme. Prisma cannot determine the connector. Invalid scheme"
         ))),
-        None => Err(CoreError::user_facing(InvalidConnectionString {
-            details: String::new(),
-        })),
     }
 }
 
